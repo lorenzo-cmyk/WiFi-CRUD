@@ -4,321 +4,449 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
-import android.widget.Toast
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import com.wificrud.app.api.ApiClient
 import com.wificrud.app.data.CredentialStore
 import com.wificrud.app.scan.ScanService
 import com.wificrud.app.scan.ScanState
 import com.wificrud.app.scan.WifiScanner
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var creds: CredentialStore
-    private val api = ApiClient()
     private lateinit var scanner: WifiScanner
+    private val api = ApiClient()
 
-    private lateinit var setupView: LinearLayout
-    private lateinit var dashboardView: LinearLayout
+    private val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ -> updatePerms() }
 
-    private lateinit var btnPermissions: Button
-    private lateinit var btnRegister: Button
-    private lateinit var btnStartScan: Button
-    private lateinit var btnStopScan: Button
+    private val bgLocationLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> updatePerms() }
 
-    private lateinit var tvPermissionStatus: TextView
-    private lateinit var tvThrottleWarning: TextView
-    private lateinit var tvSetupStatus: TextView
-    private lateinit var setupSpinner: ProgressBar
-
-    private lateinit var tvDeviceInfo: TextView
-    private lateinit var tvScanStatus: TextView
-    private lateinit var tvScanError: TextView
-    private lateinit var tvCountdown: TextView
-    private lateinit var tvLastTimestamp: TextView
-    private lateinit var tvLastGps: TextView
-    private lateinit var tvLastNetworks: TextView
-    private lateinit var tvNetworksTitle: TextView
-    private lateinit var tvNetworksList: TextView
-    private lateinit var etInterval: EditText
-
-    private var countdownJob: Job? = null
-    private var scanObserverJob: Job? = null
-
-    private val requiredPermissions: List<String> by lazy {
-        val perms = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_WIFI_STATE,
-            Manifest.permission.CHANGE_WIFI_STATE,
-        )
+    private val permissionsDef = buildList {
+        add(PermDef("ACCESS_FINE_LOCATION", Manifest.permission.ACCESS_FINE_LOCATION, "GPS location"))
+        add(PermDef("ACCESS_WIFI_STATE", Manifest.permission.ACCESS_WIFI_STATE, "WiFi state"))
+        add(PermDef("CHANGE_WIFI_STATE", Manifest.permission.CHANGE_WIFI_STATE, "Change WiFi"))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            add(PermDef("NEARBY_WIFI_DEVICES", Manifest.permission.NEARBY_WIFI_DEVICES, "Nearby WiFi devices"))
+            add(PermDef("POST_NOTIFICATIONS", Manifest.permission.POST_NOTIFICATIONS, "Notifications"))
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            perms.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            add(PermDef("ACCESS_BACKGROUND_LOCATION", Manifest.permission.ACCESS_BACKGROUND_LOCATION, "Background location (optional)"))
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        perms
     }
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> updatePermissionStatus() }
+    private var refreshPerms by mutableIntStateOf(0)
+
+    private fun updatePerms() { refreshPerms++ }
+
+    private fun checkPerm(name: String): Boolean =
+        ContextCompat.checkSelfPermission(this, name) == PackageManager.PERMISSION_GRANTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
         creds = CredentialStore(applicationContext)
         scanner = WifiScanner(this)
 
-        bindViews()
-        setupViews()
-        observeScanState()
+        setContent {
+            MaterialTheme {
+                val state by ScanState.state.collectAsState()
+                refreshPerms // force recomposition
 
-        if (creds.isRegistered) showDashboard()
-        else showSetup()
-    }
-
-    override fun onDestroy() {
-        countdownJob?.cancel()
-        scanObserverJob?.cancel()
-        super.onDestroy()
-    }
-
-    private fun bindViews() {
-        setupView = findViewById(R.id.setupView)
-        dashboardView = findViewById(R.id.dashboardView)
-        btnPermissions = findViewById(R.id.btnPermissions)
-        btnRegister = findViewById(R.id.btnRegister)
-        btnStartScan = findViewById(R.id.btnStartScan)
-        btnStopScan = findViewById(R.id.btnStopScan)
-        tvPermissionStatus = findViewById(R.id.tvPermissionStatus)
-        tvThrottleWarning = findViewById(R.id.tvThrottleWarning)
-        tvSetupStatus = findViewById(R.id.tvSetupStatus)
-        setupSpinner = findViewById(R.id.setupSpinner)
-        tvDeviceInfo = findViewById(R.id.tvDeviceInfo)
-        tvScanStatus = findViewById(R.id.tvScanStatus)
-        tvScanError = findViewById(R.id.tvScanError)
-        tvCountdown = findViewById(R.id.tvCountdown)
-        tvLastTimestamp = findViewById(R.id.tvLastTimestamp)
-        tvLastGps = findViewById(R.id.tvLastGps)
-        tvLastNetworks = findViewById(R.id.tvLastNetworks)
-        tvNetworksTitle = findViewById(R.id.tvNetworksTitle)
-        tvNetworksList = findViewById(R.id.tvNetworksList)
-        etInterval = findViewById(R.id.etInterval)
-    }
-
-    private fun setupViews() {
-        btnPermissions.setOnClickListener {
-            val needed = requiredPermissions.filter {
-                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
-            if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
-        }
-
-        btnRegister.setOnClickListener { registerDevice() }
-
-        etInterval.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (ScanState.state.value.isScanning) {
-                    btnStartScan.isEnabled = false
-                    return
+                if (creds.isRegistered) {
+                    DashboardScreen(
+                        state = state,
+                        onStart = { interval ->
+                            val bg = Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                                checkPerm(bg) != true
+                            ) {
+                                bgLocationLauncher.launch(bg)
+                            } else {
+                                ScanService.start(this@MainActivity, interval)
+                            }
+                        },
+                        onStop = { ScanService.stop(this@MainActivity) },
+                    )
+                } else {
+                    SetupScreen(
+                        perms = permissionsDef,
+                        checkPerm = { checkPerm(it) },
+                        onRequestPerms = {
+                            val needed = permissionsDef
+                                .filter { !checkPerm(it.manifestName) }
+                                .filter { it.manifestName != Manifest.permission.ACCESS_BACKGROUND_LOCATION }
+                                .map { it.manifestName }
+                                .toTypedArray()
+                            permLauncher.launch(needed)
+                        },
+                        onRequestBgLocation = {
+                            bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                        },
+                        onRegister = { registerDevice() },
+                    )
                 }
-                val v = s?.toString()?.toIntOrNull() ?: 0
-                btnStartScan.isEnabled = v in 5..120
             }
-        })
-
-        btnStartScan.setOnClickListener {
-            val interval = etInterval.text.toString().toIntOrNull()?.coerceIn(5, 120) ?: 30
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
-                return@setOnClickListener
-            }
-            ScanService.start(this, interval)
-            btnStartScan.isEnabled = false
-            btnStopScan.isEnabled = true
         }
-
-        btnStopScan.setOnClickListener {
-            ScanService.stop(this)
-            btnStartScan.isEnabled = true
-            btnStopScan.isEnabled = false
-        }
-    }
-
-    private fun showSetup() {
-        dashboardView.visibility = android.view.View.GONE
-        setupView.visibility = android.view.View.VISIBLE
-        updatePermissionStatus()
-    }
-
-    private fun showDashboard() {
-        setupView.visibility = android.view.View.GONE
-        dashboardView.visibility = android.view.View.VISIBLE
-        tvDeviceInfo.text = "Device: ${creds.deviceName}\nID: ${creds.deviceId}"
-    }
-
-    private fun updatePermissionStatus() {
-        val allGranted = requiredPermissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (allGranted) {
-            tvPermissionStatus.setTextColor(0xFF2E7D32.toInt())
-            tvPermissionStatus.text = "All permissions granted"
-            btnPermissions.isEnabled = false
-            btnPermissions.text = "Permissions OK"
-            checkThrottleAndEnableRegister()
-        } else {
-            tvPermissionStatus.setTextColor(0xFFC62828.toInt())
-            val missing = requiredPermissions.count {
-                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
-            tvPermissionStatus.text = "$missing permission(s) still required"
-            btnPermissions.isEnabled = true
-            btnPermissions.text = "Grant Permissions"
-            btnRegister.isEnabled = false
-        }
-    }
-
-    private fun checkThrottleAndEnableRegister() {
-        if (scanner.isThrottleWarningNeeded()) {
-            tvThrottleWarning.visibility = android.view.View.VISIBLE
-            tvThrottleWarning.text = buildString {
-                append("Warning: WiFi scan throttling is enabled.\n")
-                append("On Android 9+, apps are limited to 4 WiFi scans every 2 minutes.\n")
-                append("To disable: Developer Options \u2192 WiFi scan throttling \u2192 OFF.\n\n")
-                append("The app will still work but scans may be rate-limited.")
-            }
-        } else {
-            tvThrottleWarning.visibility = android.view.View.GONE
-        }
-        btnRegister.isEnabled = true
     }
 
     private fun registerDevice() {
-        btnRegister.isEnabled = false
-        setupSpinner.visibility = android.view.View.VISIBLE
-        tvSetupStatus.setTextColor(0xFF666666.toInt())
-        tvSetupStatus.text = "Registering device..."
-        val deviceName = Build.MODEL.take(64)
-
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) { api.register(deviceName) }
-            setupSpinner.visibility = android.view.View.GONE
+        kotlinx.coroutines.MainScope().launch {
+            val name = Build.MODEL.take(64)
+            val result = withContext(Dispatchers.IO) { api.register(name) }
             if (result.error != null) {
-                tvSetupStatus.setTextColor(0xFFC62828.toInt())
-                tvSetupStatus.text = "Error: ${result.error}"
-                btnRegister.isEnabled = true
+                // TODO show error
+                return@launch
+            }
+            creds.deviceId = result.deviceId
+            creds.authKey = result.authKey
+            creds.deviceName = name
+            updatePerms()
+        }
+    }
+}
+
+data class PermDef(val label: String, val manifestName: String, val display: String)
+
+@Composable
+private fun SetupScreen(
+    perms: List<PermDef>,
+    checkPerm: (String) -> Boolean,
+    onRequestPerms: () -> Unit,
+    onRequestBgLocation: () -> Unit,
+    onRegister: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val scanner = remember { WifiScanner(ctx) }
+    var registering by remember { mutableStateOf(false) }
+    var regError by remember { mutableStateOf<String?>(null) }
+
+    val allGranted = perms.all { checkPerm(it.manifestName) }
+    val missingCount = perms.count { !checkPerm(it.manifestName) }
+    val throttleWarning = remember { scanner.isThrottleWarningNeeded() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text("WiFi CRUD", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("First-time setup", fontSize = 14.sp, color = Color.Gray)
+        Spacer(Modifier.height(20.dp))
+
+        Text("Permissions", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        Spacer(Modifier.height(8.dp))
+
+        perms.forEach { perm ->
+            val granted = checkPerm(perm.manifestName)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+            ) {
+                Text(
+                    text = if (granted) "\u2705" else "\u274C",
+                    fontSize = 14.sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = perm.display,
+                    fontSize = 14.sp,
+                    color = if (granted) Color(0xFF2E7D32) else Color.Unspecified,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onRequestPerms,
+            enabled = missingCount > 0,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (missingCount > 0) {
+                Text("Grant $missingCount missing permission(s)")
             } else {
-                creds.deviceId = result.deviceId
-                creds.authKey = result.authKey
-                creds.deviceName = deviceName
-                tvSetupStatus.setTextColor(0xFF2E7D32.toInt())
-                tvSetupStatus.text = "Device registered!"
-                showDashboard()
-                Toast.makeText(this@MainActivity, "Device registered", Toast.LENGTH_SHORT).show()
+                Text("All permissions granted")
+            }
+        }
+
+        if (allGranted) {
+            val bgName = Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            val bgDeclared = perms.any { it.manifestName == bgName }
+            if (bgDeclared && !checkPerm(bgName)) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onRequestBgLocation,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Grant background location (recommended)")
+                }
+            }
+        }
+
+        if (allGranted && throttleWarning) {
+            Spacer(Modifier.height(12.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3CD)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = buildString {
+                        append("Warning: WiFi scan throttling is enabled.\n")
+                        append("On Android 9+, apps are limited to 4 WiFi scans every 2 minutes.\n")
+                        append("To disable: Developer Options \u2192 WiFi scan throttling \u2192 OFF.\n\n")
+                        append("The app will still work but scans may be rate-limited.")
+                    },
+                    fontSize = 13.sp,
+                    color = Color(0xFF856404),
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        }
+
+        if (allGranted) {
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    registering = true
+                    regError = null
+                    onRegister()
+                },
+                enabled = !registering,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (registering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .height(20.dp)
+                            .width(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("Register Device")
+            }
+            regError?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = Color.Red, fontSize = 13.sp)
             }
         }
     }
+}
 
-    private fun observeScanState() {
-        scanObserverJob = lifecycleScope.launch {
-            ScanState.state.collectLatest { state ->
-                updateDashboard(state)
+@Composable
+private fun DashboardScreen(
+    state: ScanState.State,
+    onStart: (Int) -> Unit,
+    onStop: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val creds = remember { CredentialStore(ctx) }
+    var intervalText by remember { mutableStateOf("30") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text("WiFi CRUD", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text(
+            "Device: ${creds.deviceName}\nID: ${creds.deviceId}",
+            fontSize = 12.sp,
+            color = Color.Gray,
+        )
+        Spacer(Modifier.height(16.dp))
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Interval (s):", fontSize = 14.sp)
+            Spacer(Modifier.width(8.dp))
+            OutlinedTextField(
+                value = intervalText,
+                onValueChange = { v ->
+                    if (v.all { it.isDigit() } && v.length <= 3) intervalText = v
+                },
+                modifier = Modifier.width(80.dp),
+                singleLine = true,
+                enabled = !state.isScanning,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("(5\u2013120)", fontSize = 12.sp, color = Color.Gray)
+        }
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = {
+                    val interval = intervalText.toIntOrNull()?.coerceIn(5, 120) ?: 30
+                    onStart(interval)
+                },
+                enabled = !state.isScanning,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Start Scanning")
+            }
+            OutlinedButton(
+                onClick = onStop,
+                enabled = state.isScanning,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Stop")
             }
         }
-    }
 
-    private fun updateDashboard(state: ScanState.State) {
         if (state.isScanning) {
-            tvScanStatus.visibility = android.view.View.VISIBLE
-            tvScanStatus.text = "Scanning every ${state.intervalSeconds}s \u2014 active"
-            btnStartScan.isEnabled = false
-            btnStopScan.isEnabled = true
-            etInterval.isEnabled = false
-
-            countdownJob?.cancel()
-            countdownJob = lifecycleScope.launch { countdownLoop(state.nextScanAt) }
-        } else {
-            tvScanStatus.visibility = android.view.View.GONE
-            tvCountdown.text = ""
-            btnStartScan.isEnabled = true
-            btnStopScan.isEnabled = false
-            etInterval.isEnabled = true
-            countdownJob?.cancel()
+            Spacer(Modifier.height(12.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Scanning every ${state.intervalSeconds}s \u2014 active",
+                    fontSize = 14.sp,
+                    color = Color(0xFF2E7D32),
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            CountdownText(nextScanAt = state.nextScanAt)
         }
 
         if (state.error != null) {
-            tvScanError.visibility = android.view.View.VISIBLE
-            tvScanError.text = state.error
-        } else {
-            tvScanError.visibility = android.view.View.GONE
+            Spacer(Modifier.height(8.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = state.error,
+                    fontSize = 13.sp,
+                    color = Color(0xFFC62828),
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
         }
 
         val m = state.lastMeasurement
         if (m != null) {
-            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            tvLastTimestamp.text = "Timestamp: ${fmt.format(Date(m.timestamp * 1000))}"
-            tvLastGps.text = "GPS: ${m.gpsLat?.let { "%.5f".format(it) } ?: "\u2014"}, ${m.gpsLon?.let { "%.5f".format(it) } ?: "\u2014"}"
-            tvLastNetworks.text = "WiFi networks found: ${m.networks}"
+            Spacer(Modifier.height(16.dp))
+            Text("Last measurement", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Spacer(Modifier.height(8.dp))
+
+            val fmt = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
+            Text("Timestamp: ${fmt.format(Date(m.timestamp * 1000))}", fontSize = 13.sp)
+            Text(
+                "GPS: ${m.gpsLat?.let { "%.5f".format(it) } ?: "\u2014"}, ${m.gpsLon?.let { "%.5f".format(it) } ?: "\u2014"}",
+                fontSize = 13.sp,
+            )
+            Text("WiFi networks found: ${m.networks}", fontSize = 13.sp)
 
             if (m.scans.isNotEmpty()) {
-                tvNetworksTitle.visibility = android.view.View.VISIBLE
-                tvNetworksList.visibility = android.view.View.VISIBLE
-                tvNetworksList.text = m.scans.joinToString("\n") { s ->
-                    "  ${s.ssid ?: "\u2014"}  |  ${s.bssid}  |  ${s.rssi} dBm"
+                Spacer(Modifier.height(8.dp))
+                Text("WiFi Networks", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Spacer(Modifier.height(4.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = m.scans.joinToString("\n") { s ->
+                            "  ${s.ssid ?: "\u2014"}  |  ${s.bssid}  |  ${s.rssi} dBm"
+                        },
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(8.dp),
+                    )
                 }
-            } else {
-                tvNetworksTitle.visibility = android.view.View.GONE
-                tvNetworksList.visibility = android.view.View.GONE
             }
         }
     }
+}
 
-    private suspend fun countdownLoop(nextScanAt: Long) {
+@Composable
+private fun CountdownText(nextScanAt: Long) {
+    var label by remember { mutableStateOf("") }
+    LaunchedEffect(nextScanAt) {
         while (true) {
             val remaining = nextScanAt - System.currentTimeMillis()
-            if (remaining <= 0) {
-                tvCountdown.text = "Scanning now..."
-                delay(500)
-                continue
+            label = if (remaining <= 0) {
+                "Scanning now..."
+            } else {
+                val secs = remaining / 1000
+                "Next scan in: ${secs / 60}m ${secs % 60}s"
             }
-            val secs = remaining / 1000
-            val label = when {
-                secs > 60 -> "${secs / 60}m ${secs % 60}s"
-                else -> "${secs}s"
-            }
-            tvCountdown.text = "Next scan in: $label"
             delay(500)
         }
+    }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = label,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(12.dp),
+        )
     }
 }
