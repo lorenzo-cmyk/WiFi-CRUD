@@ -137,7 +137,16 @@ Query misurazioni. Autenticato con Bearer token.
 - `CredentialStore` — wrapper SharedPreferences per device_id/auth_key/device_name
 - `ApiClient` — HTTP client con `HttpURLConnection` (nessuna dependency esterna), chiamate a register + postMeasurement
 - `WifiScanner` — wrapper attorno a `WifiManager` per scan + lettura risultati + throttle detection
-- `MainActivity` — UI con setup wizard (permessi → throttle → register) e schermata scan
+- `MainActivity` — UI con setup wizard (permessi → throttle → register) e dashboard scan
+- `ScanService` — foreground service persistente, loop periodico scan WiFi + GPS + API + notifica
+- `ScanState` — singleton condiviso via StateFlow tra Service e Activity per UI live
+
+### Flusso scanning
+1. Utente imposta intervallo (5–120 secondi), preme "Start Scanning"
+2. `ScanService` parte come foreground con notifica permanente
+3. Ogni N secondi: GPS (last known) → scan WiFi → POST /api/measurements
+4. Dashboard mostra conto alla rovescia, ultima misurazione (timestamp, GPS, networks)
+5. Pulsante "Stop" per terminare il loop
 
 ### Build
 ```bash

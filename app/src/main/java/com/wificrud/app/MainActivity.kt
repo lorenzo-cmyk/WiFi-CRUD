@@ -4,8 +4,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -13,32 +15,54 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.wificrud.app.api.ApiClient
 import com.wificrud.app.data.CredentialStore
+import com.wificrud.app.scan.ScanService
+import com.wificrud.app.scan.ScanState
 import com.wificrud.app.scan.WifiScanner
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var creds: CredentialStore
     private val api = ApiClient()
     private lateinit var scanner: WifiScanner
-    private val scope = CoroutineScope(Dispatchers.Main)
 
     private lateinit var setupView: LinearLayout
-    private lateinit var mainView: LinearLayout
+    private lateinit var dashboardView: LinearLayout
+
     private lateinit var btnPermissions: Button
     private lateinit var btnRegister: Button
-    private lateinit var btnScan: Button
+    private lateinit var btnStartScan: Button
+    private lateinit var btnStopScan: Button
+
     private lateinit var tvPermissionStatus: TextView
     private lateinit var tvThrottleWarning: TextView
     private lateinit var tvSetupStatus: TextView
     private lateinit var setupSpinner: ProgressBar
+
     private lateinit var tvDeviceInfo: TextView
     private lateinit var tvScanStatus: TextView
+    private lateinit var tvScanError: TextView
+    private lateinit var tvCountdown: TextView
+    private lateinit var tvLastTimestamp: TextView
+    private lateinit var tvLastGps: TextView
+    private lateinit var tvLastNetworks: TextView
+    private lateinit var tvNetworksTitle: TextView
+    private lateinit var tvNetworksList: TextView
+    private lateinit var etInterval: EditText
+
+    private var countdownJob: Job? = null
+    private var scanObserverJob: Job? = null
 
     private val requiredPermissions: List<String> by lazy {
         val perms = mutableListOf(
@@ -52,6 +76,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             perms.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         perms
     }
@@ -69,26 +96,39 @@ class MainActivity : AppCompatActivity() {
 
         bindViews()
         setupViews()
+        observeScanState()
 
-        if (creds.isRegistered) {
-            showMainView()
-        } else {
-            showSetupView()
-        }
+        if (creds.isRegistered) showDashboard()
+        else showSetup()
+    }
+
+    override fun onDestroy() {
+        countdownJob?.cancel()
+        scanObserverJob?.cancel()
+        super.onDestroy()
     }
 
     private fun bindViews() {
         setupView = findViewById(R.id.setupView)
-        mainView = findViewById(R.id.mainView)
+        dashboardView = findViewById(R.id.dashboardView)
         btnPermissions = findViewById(R.id.btnPermissions)
         btnRegister = findViewById(R.id.btnRegister)
-        btnScan = findViewById(R.id.btnScan)
+        btnStartScan = findViewById(R.id.btnStartScan)
+        btnStopScan = findViewById(R.id.btnStopScan)
         tvPermissionStatus = findViewById(R.id.tvPermissionStatus)
         tvThrottleWarning = findViewById(R.id.tvThrottleWarning)
         tvSetupStatus = findViewById(R.id.tvSetupStatus)
         setupSpinner = findViewById(R.id.setupSpinner)
         tvDeviceInfo = findViewById(R.id.tvDeviceInfo)
         tvScanStatus = findViewById(R.id.tvScanStatus)
+        tvScanError = findViewById(R.id.tvScanError)
+        tvCountdown = findViewById(R.id.tvCountdown)
+        tvLastTimestamp = findViewById(R.id.tvLastTimestamp)
+        tvLastGps = findViewById(R.id.tvLastGps)
+        tvLastNetworks = findViewById(R.id.tvLastNetworks)
+        tvNetworksTitle = findViewById(R.id.tvNetworksTitle)
+        tvNetworksList = findViewById(R.id.tvNetworksList)
+        etInterval = findViewById(R.id.etInterval)
     }
 
     private fun setupViews() {
@@ -96,29 +136,54 @@ class MainActivity : AppCompatActivity() {
             val needed = requiredPermissions.filter {
                 ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
-            if (needed.isNotEmpty()) {
-                permissionLauncher.launch(needed.toTypedArray())
+            if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
+        }
+
+        btnRegister.setOnClickListener { registerDevice() }
+
+        etInterval.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (ScanState.state.value.isScanning) {
+                    btnStartScan.isEnabled = false
+                    return
+                }
+                val v = s?.toString()?.toIntOrNull() ?: 0
+                btnStartScan.isEnabled = v in 5..120
             }
+        })
+
+        btnStartScan.setOnClickListener {
+            val interval = etInterval.text.toString().toIntOrNull()?.coerceIn(5, 120) ?: 30
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                return@setOnClickListener
+            }
+            ScanService.start(this, interval)
+            btnStartScan.isEnabled = false
+            btnStopScan.isEnabled = true
         }
 
-        btnRegister.setOnClickListener {
-            registerDevice()
-        }
-
-        btnScan.setOnClickListener {
-            performScan()
+        btnStopScan.setOnClickListener {
+            ScanService.stop(this)
+            btnStartScan.isEnabled = true
+            btnStopScan.isEnabled = false
         }
     }
 
-    private fun showSetupView() {
-        mainView.visibility = android.view.View.GONE
+    private fun showSetup() {
+        dashboardView.visibility = android.view.View.GONE
         setupView.visibility = android.view.View.VISIBLE
         updatePermissionStatus()
     }
 
-    private fun showMainView() {
+    private fun showDashboard() {
         setupView.visibility = android.view.View.GONE
-        mainView.visibility = android.view.View.VISIBLE
+        dashboardView.visibility = android.view.View.VISIBLE
         tvDeviceInfo.text = "Device: ${creds.deviceName}\nID: ${creds.deviceId}"
     }
 
@@ -126,13 +191,11 @@ class MainActivity : AppCompatActivity() {
         val allGranted = requiredPermissions.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
-
         if (allGranted) {
             tvPermissionStatus.setTextColor(0xFF2E7D32.toInt())
             tvPermissionStatus.text = "All permissions granted"
             btnPermissions.isEnabled = false
             btnPermissions.text = "Permissions OK"
-
             checkThrottleAndEnableRegister()
         } else {
             tvPermissionStatus.setTextColor(0xFFC62828.toInt())
@@ -147,13 +210,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkThrottleAndEnableRegister() {
-        val warning = scanner.isThrottleWarningNeeded()
-        if (warning) {
+        if (scanner.isThrottleWarningNeeded()) {
             tvThrottleWarning.visibility = android.view.View.VISIBLE
             tvThrottleWarning.text = buildString {
                 append("Warning: WiFi scan throttling is enabled.\n")
                 append("On Android 9+, apps are limited to 4 WiFi scans every 2 minutes.\n")
-                append("To disable: Developer Options → WiFi scan throttling → OFF.\n\n")
+                append("To disable: Developer Options \u2192 WiFi scan throttling \u2192 OFF.\n\n")
                 append("The app will still work but scans may be rate-limited.")
             }
         } else {
@@ -167,16 +229,11 @@ class MainActivity : AppCompatActivity() {
         setupSpinner.visibility = android.view.View.VISIBLE
         tvSetupStatus.setTextColor(0xFF666666.toInt())
         tvSetupStatus.text = "Registering device..."
-
         val deviceName = Build.MODEL.take(64)
 
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                api.register(deviceName)
-            }
-
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { api.register(deviceName) }
             setupSpinner.visibility = android.view.View.GONE
-
             if (result.error != null) {
                 tvSetupStatus.setTextColor(0xFFC62828.toInt())
                 tvSetupStatus.text = "Error: ${result.error}"
@@ -185,78 +242,83 @@ class MainActivity : AppCompatActivity() {
                 creds.deviceId = result.deviceId
                 creds.authKey = result.authKey
                 creds.deviceName = deviceName
-
                 tvSetupStatus.setTextColor(0xFF2E7D32.toInt())
                 tvSetupStatus.text = "Device registered!"
-                showMainView()
-                Toast.makeText(
-                    this@MainActivity,
-                    "Device registered successfully",
-                    Toast.LENGTH_SHORT
-                ).show()
+                showDashboard()
+                Toast.makeText(this@MainActivity, "Device registered", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun performScan() {
-        btnScan.isEnabled = false
-        tvScanStatus.text = "Scanning..."
-
-        scope.launch {
-            val scanStarted = withContext(Dispatchers.IO) {
-                scanner.startScan()
+    private fun observeScanState() {
+        scanObserverJob = lifecycleScope.launch {
+            ScanState.state.collectLatest { state ->
+                updateDashboard(state)
             }
+        }
+    }
 
-            if (!scanStarted) {
-                tvScanStatus.text = "Scan failed to start. Check WiFi is enabled."
-                btnScan.isEnabled = true
-                return@launch
-            }
+    private fun updateDashboard(state: ScanState.State) {
+        if (state.isScanning) {
+            tvScanStatus.visibility = android.view.View.VISIBLE
+            tvScanStatus.text = "Scanning every ${state.intervalSeconds}s \u2014 active"
+            btnStartScan.isEnabled = false
+            btnStopScan.isEnabled = true
+            etInterval.isEnabled = false
 
-            kotlinx.coroutines.delay(3000)
+            countdownJob?.cancel()
+            countdownJob = lifecycleScope.launch { countdownLoop(state.nextScanAt) }
+        } else {
+            tvScanStatus.visibility = android.view.View.GONE
+            tvCountdown.text = ""
+            btnStartScan.isEnabled = true
+            btnStopScan.isEnabled = false
+            etInterval.isEnabled = true
+            countdownJob?.cancel()
+        }
 
-            val results = withContext(Dispatchers.IO) {
-                scanner.getScanResults()
-            }
+        if (state.error != null) {
+            tvScanError.visibility = android.view.View.VISIBLE
+            tvScanError.text = state.error
+        } else {
+            tvScanError.visibility = android.view.View.GONE
+        }
 
-            if (results.isEmpty()) {
-                tvScanStatus.text = "No networks found. Try again."
-                btnScan.isEnabled = true
-                return@launch
-            }
+        val m = state.lastMeasurement
+        if (m != null) {
+            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            tvLastTimestamp.text = "Timestamp: ${fmt.format(Date(m.timestamp * 1000))}"
+            tvLastGps.text = "GPS: ${m.gpsLat?.let { "%.5f".format(it) } ?: "\u2014"}, ${m.gpsLon?.let { "%.5f".format(it) } ?: "\u2014"}"
+            tvLastNetworks.text = "WiFi networks found: ${m.networks}"
 
-            tvScanStatus.text = "Found ${results.size} networks. Sending..."
-
-            val now = System.currentTimeMillis() / 1000
-
-            val scans = results.map { r ->
-                ApiClient.ScanEntry(
-                    ssid = r.ssid,
-                    bssid = r.bssid,
-                    rssi = r.level
-                )
-            }
-
-            val gpsLat: Double? = null
-            val gpsLon: Double? = null
-
-            val postResult = withContext(Dispatchers.IO) {
-                api.postMeasurement(
-                    authKey = creds.authKey,
-                    timestamp = now,
-                    gpsLat = gpsLat,
-                    gpsLon = gpsLon,
-                    wifiScans = scans
-                )
-            }
-
-            if (postResult.success) {
-                tvScanStatus.text = "Sent ${results.size} networks (ID: ${postResult.measurementId})"
+            if (m.scans.isNotEmpty()) {
+                tvNetworksTitle.visibility = android.view.View.VISIBLE
+                tvNetworksList.visibility = android.view.View.VISIBLE
+                tvNetworksList.text = m.scans.joinToString("\n") { s ->
+                    "  ${s.ssid ?: "\u2014"}  |  ${s.bssid}  |  ${s.rssi} dBm"
+                }
             } else {
-                tvScanStatus.text = "Send failed: ${postResult.error}"
+                tvNetworksTitle.visibility = android.view.View.GONE
+                tvNetworksList.visibility = android.view.View.GONE
             }
+        }
+    }
 
-            btnScan.isEnabled = true
+    private suspend fun countdownLoop(nextScanAt: Long) {
+        while (true) {
+            val remaining = nextScanAt - System.currentTimeMillis()
+            if (remaining <= 0) {
+                tvCountdown.text = "Scanning now..."
+                delay(500)
+                continue
+            }
+            val secs = remaining / 1000
+            val label = when {
+                secs > 60 -> "${secs / 60}m ${secs % 60}s"
+                else -> "${secs}s"
+            }
+            tvCountdown.text = "Next scan in: $label"
+            delay(500)
         }
     }
 }
