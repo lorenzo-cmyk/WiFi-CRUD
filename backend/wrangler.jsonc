@@ -1,0 +1,13 @@
+{
+  "name": "wifi-crud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wifi-crud-db",
+      "database_id": "0fa6e6e2-ffa5-44b6-8fee-2232c009667c"
+    }
+  ]
+}

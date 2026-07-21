@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 execute wifi-crud-db --remote --file=./schema.sql",
-    "db:migrate:local": "wrangler d1 execute wifi-crud-db --local --file=./schema.sql"
+    "dev:backend": "wrangler dev --config backend/wrangler.jsonc",
+    "deploy:backend": "wrangler deploy --config backend/wrangler.jsonc",
+    "db:migrate": "wrangler d1 execute wifi-crud-db --remote --file=backend/schema.sql",
+    "db:migrate:local": "wrangler d1 execute wifi-crud-db --local --file=backend/schema.sql"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260714.0",

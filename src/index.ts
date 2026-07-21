@@ -1,230 +1,168 @@
-interface Env {
-  DB: D1Database;
-}
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Device-Key",
-  "Access-Control-Max-Age": "86400",
-};
-
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  });
-}
-
-function err(message: string, status = 400): Response {
-  return json({ error: message }, status);
-}
-
-async function sha256(input: string): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function randomHex(bytes = 32): string {
-  const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
-  return Array.from(buf).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function getAuthUser(request: Request): string | null {
-  const h = request.headers.get("Authorization");
-  if (!h || !h.startsWith("Bearer ")) return null;
-  return h.slice(7);
-}
-
-function getDeviceKey(request: Request): string | null {
-  return request.headers.get("X-Device-Key");
-}
+const HTML = [
+'<!DOCTYPE html>',
+'<html lang="en">',
+'<head>',
+'<meta charset="UTF-8">',
+'<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+'<title>WiFi CRUD</title>',
+'<script src="https://cdn.tailwindcss.com"></script>',
+'</head>',
+'<body class="bg-gray-900 text-gray-100 min-h-screen">',
+'<div id="app" class="max-w-5xl mx-auto p-6">',
+'',
+'<div id="login-view">',
+'<div class="flex items-center justify-center min-h-screen">',
+'<div class="w-full max-w-sm bg-gray-800 rounded-2xl shadow-xl p-8">',
+'<h1 class="text-2xl font-bold text-center mb-2">WiFi CRUD</h1>',
+'<p class="text-gray-400 text-center text-sm mb-6">IoT Tracking Dashboard</p>',
+'<div id="login-error" class="bg-red-900/50 text-red-300 text-sm rounded-lg p-3 mb-4 hidden"></div>',
+'<input id="login-user" type="text" placeholder="Username" class="w-full bg-gray-700 rounded-lg px-4 py-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'<input id="login-pass" type="password" placeholder="Password" class="w-full bg-gray-700 rounded-lg px-4 py-2.5 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'<button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-700 font-semibold rounded-lg px-4 py-2.5 transition">Login</button>',
+'</div>',
+'</div>',
+'</div>',
+'',
+'<div id="dashboard-view" class="hidden">',
+'<div class="flex items-center justify-between mb-8">',
+'<h1 class="text-2xl font-bold">WiFi CRUD</h1>',
+'<button onclick="logout()" class="bg-gray-700 hover:bg-gray-600 text-sm rounded-lg px-4 py-2 transition">Logout</button>',
+'</div>',
+'',
+'<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">',
+'<div class="bg-gray-800 rounded-xl p-5">',
+'<h2 class="text-lg font-semibold mb-3">Devices</h2>',
+'<div id="device-list" class="space-y-2"></div>',
+'</div>',
+'<div class="bg-gray-800 rounded-xl p-5">',
+'<h2 class="text-lg font-semibold mb-3">Quick Filters</h2>',
+'<div class="space-y-2">',
+'<input id="filter-device" type="text" placeholder="Device ID" class="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'<input id="filter-bssid" type="text" placeholder="BSSID (e.g. 00:11:22:33:44:55)" class="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'<div class="flex gap-2">',
+'<input id="filter-start" type="number" placeholder="Start timestamp" class="flex-1 bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'<input id="filter-end" type="number" placeholder="End timestamp" class="flex-1 bg-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">',
+'</div>',
+'<button onclick="loadMeasurements()" class="w-full bg-blue-600 hover:bg-blue-700 rounded-lg py-2 text-sm font-semibold transition">Apply Filters</button>',
+'</div>',
+'</div>',
+'</div>',
+'',
+'<div class="bg-gray-800 rounded-xl p-5">',
+'<h2 class="text-lg font-semibold mb-3">Measurements <span id="meas-count" class="text-gray-400 text-sm font-normal"></span></h2>',
+'<div id="measurement-list" class="space-y-3"></div>',
+'</div>',
+'</div>',
+'',
+'</div>',
+'',
+'<script>',
+'const API = "https://wifi-crud.lorenzo-chiroli.workers.dev";',
+'let token = localStorage.getItem("token");',
+'',
+'function login() {',
+'  const u = document.getElementById("login-user").value;',
+'  const p = document.getElementById("login-pass").value;',
+'  const err = document.getElementById("login-error");',
+'  err.classList.add("hidden");',
+'  fetch(API + "/api/users/login", {',
+'    method: "POST", headers: {"Content-Type": "application/json"},',
+'    body: JSON.stringify({username: u, password: p})',
+'  }).then(r => r.json()).then(d => {',
+'    if (d.session_token) {',
+'      localStorage.setItem("token", d.session_token);',
+'      token = d.session_token;',
+'      document.getElementById("login-view").classList.add("hidden");',
+'      document.getElementById("dashboard-view").classList.remove("hidden");',
+'      loadDevices();',
+'      loadMeasurements();',
+'    } else {',
+'      err.textContent = d.error || "Login failed";',
+'      err.classList.remove("hidden");',
+'    }',
+'  }).catch(() => { err.textContent = "Connection error"; err.classList.remove("hidden"); });',
+'}',
+'',
+'function logout() {',
+'  localStorage.removeItem("token");',
+'  token = null;',
+'  document.getElementById("dashboard-view").classList.add("hidden");',
+'  document.getElementById("login-view").classList.remove("hidden");',
+'}',
+'',
+'function loadDevices() {',
+'  fetch(API + "/api/devices", {headers: {"Authorization": "Bearer " + token}})',
+'    .then(r => r.json()).then(list => {',
+'      const el = document.getElementById("device-list");',
+'      if (!list.length) { el.innerHTML = "<p class=\\"text-gray-400 text-sm\\">No devices registered.</p>"; return; }',
+'      el.innerHTML = list.map(d =>',
+'        "<div class=\\"bg-gray-700/50 rounded-lg p-3 flex justify-between items-center\\">" +',
+'          "<div><p class=\\"font-medium\\">" + (d.name || "Unnamed") + "</p>" +',
+'          "<p class=\\"text-xs text-gray-400 font-mono\\">" + d.id + "</p></div>" +',
+'          "<span class=\\"text-xs text-gray-500\\">" + new Date(d.created_at * 1000).toLocaleDateString() + "</span>" +',
+'        "</div>"',
+'      ).join("");',
+'    });',
+'}',
+'',
+'function loadMeasurements() {',
+'  const p = new URLSearchParams();',
+'  const dev = document.getElementById("filter-device").value;',
+'  const bssid = document.getElementById("filter-bssid").value;',
+'  const st = document.getElementById("filter-start").value;',
+'  const en = document.getElementById("filter-end").value;',
+'  if (dev) p.set("device_id", dev);',
+'  if (bssid) p.set("bssid", bssid);',
+'  if (st) p.set("start_time", st);',
+'  if (en) p.set("end_time", en);',
+'  p.set("limit", "50");',
+'  fetch(API + "/api/measurements?" + p, {headers: {"Authorization": "Bearer " + token}})',
+'    .then(r => r.json()).then(d => {',
+'      const el = document.getElementById("measurement-list");',
+'      document.getElementById("meas-count").textContent = d.total ? "(" + d.total + " total)" : "";',
+'      if (!d.measurements || !d.measurements.length) {',
+'        el.innerHTML = "<p class=\\"text-gray-400 text-sm\\">No measurements found.</p>"; return;',
+'      }',
+'      el.innerHTML = d.measurements.map(m => {',
+'        const gps = m.gps_lat != null ? m.gps_lat.toFixed(4) + ", " + m.gps_lon.toFixed(4) : "\u2014";',
+'        const scans = m.wifi_scans && m.wifi_scans.length',
+'          ? "<details class=\\"mt-2\\"><summary class=\\"text-xs text-blue-400 cursor-pointer hover:text-blue-300\\">WiFi Scans (" + m.wifi_scans.length + ")</summary><div class=\\"mt-2 space-y-1\\">"',
+'            + m.wifi_scans.map(s =>',
+'              "<div class=\\"flex justify-between text-xs bg-gray-800 rounded px-3 py-1.5\\">"',
+'              + "<span>" + (s.ssid || "\u2014") + "</span>"',
+'              + "<span class=\\"font-mono text-gray-400\\">" + s.bssid + "</span>"',
+'              + "<span class=\\"" + (s.rssi < -75 ? "text-red-400" : "text-green-400") + "\\">" + s.rssi + " dBm</span>"',
+'              + "</div>"',
+'            ).join("")',
+'          + "</div></details>"',
+'          : "";',
+'        return "<div class=\\"bg-gray-700/50 rounded-lg p-4\\">"',
+'          + "<div class=\\"flex justify-between items-start mb-2\\">"',
+'          + "<div><p class=\\"font-mono text-xs text-gray-400\\">" + m.device_id + "</p>"',
+'          + "<p class=\\"text-sm mt-1\\">" + new Date(m.timestamp * 1000).toLocaleString() + "</p></div>"',
+'          + "<div class=\\"text-right text-sm\\"><p>" + gps + "</p></div>"',
+'          + "</div>"',
+'          + scans',
+'          + "</div>";',
+'      }).join("");',
+'    });',
+'}',
+'',
+'if (token) {',
+'  document.getElementById("login-view").classList.add("hidden");',
+'  document.getElementById("dashboard-view").classList.remove("hidden");',
+'  loadDevices();',
+'  loadMeasurements();',
+'}',
+'</script>',
+'</body>',
+'</html>',
+].join('\n');
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const { pathname } = url;
-    const method = request.method;
-
-    if (method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
-    try {
-      if (pathname === "/api/devices/register" && method === "POST") {
-        return registerDevice(request, env);
-      }
-      if (pathname === "/api/measurements" && method === "POST") {
-        return postMeasurement(request, env);
-      }
-      if (pathname === "/api/users/login" && method === "POST") {
-        return loginUser(request, env);
-      }
-      if (pathname === "/api/devices" && method === "GET") {
-        return listDevices(request, env);
-      }
-      if (pathname === "/api/measurements" && method === "GET") {
-        return getMeasurements(request, env);
-      }
-      return err("Not found", 404);
-    } catch (e) {
-      console.error(JSON.stringify({ error: e instanceof Error ? e.message : String(e), path: pathname }));
-      return err("Internal server error", 500);
-    }
+  async fetch(): Promise<Response> {
+    return new Response(HTML, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
   },
-} satisfies ExportedHandler<Env>;
-
-async function registerDevice(request: Request, env: Env): Promise<Response> {
-  let body: Record<string, unknown>;
-  try { body = await request.json(); } catch { return err("Invalid JSON", 400); }
-  if (!body.name || typeof body.name !== "string") return err('"name" (string) is required', 400);
-
-  const id = crypto.randomUUID();
-  const key = randomHex(32);
-  const now = Math.floor(Date.now() / 1000);
-
-  await env.DB.prepare("INSERT INTO devices (id, auth_key, name, created_at) VALUES (?, ?, ?, ?)")
-    .bind(id, key, body.name, now).run();
-
-  return json({ device_id: id, auth_key: key }, 201);
-}
-
-async function postMeasurement(request: Request, env: Env): Promise<Response> {
-  const deviceKey = getDeviceKey(request);
-  if (!deviceKey) return err("Missing X-Device-Key header", 401);
-
-  const device = await env.DB.prepare("SELECT id FROM devices WHERE auth_key = ?")
-    .bind(deviceKey).first<{ id: string }>();
-  if (!device) return err("Invalid device key", 401);
-
-  let body: {
-    timestamp?: number;
-    gps_lat?: number;
-    gps_lon?: number;
-    wifi_scans?: Array<{ ssid?: string; bssid: string; rssi: number }>;
-  };
-  try { body = await request.json(); } catch { return err("Invalid JSON", 400); }
-  if (!body.wifi_scans || !Array.isArray(body.wifi_scans)) {
-    return err('"wifi_scans" array is required', 400);
-  }
-
-  const MIN_TS = 1704067200;
-  const ts = body.timestamp && body.timestamp >= MIN_TS ? body.timestamp : Math.floor(Date.now() / 1000);
-  const now = Math.floor(Date.now() / 1000);
-
-  const meas = await env.DB.prepare(
-    "INSERT INTO measurements (device_id, timestamp, gps_lat, gps_lon, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).bind(device.id, ts, body.gps_lat ?? null, body.gps_lon ?? null, now).run();
-
-  const measId = meas.meta.last_row_id;
-  if (!measId) return err("Failed to create measurement", 500);
-
-  if (body.wifi_scans.length > 0) {
-    const stmt = env.DB.prepare(
-      "INSERT INTO wifi_scans (measurement_id, ssid, bssid, rssi) VALUES (?, ?, ?, ?)"
-    );
-    await env.DB.batch(body.wifi_scans.map((s) => stmt.bind(measId, s.ssid ?? null, s.bssid, s.rssi)));
-  }
-
-  return json({ status: "success", measurement_id: measId }, 201);
-}
-
-async function loginUser(request: Request, env: Env): Promise<Response> {
-  let body: { username?: string; password?: string };
-  try { body = await request.json(); } catch { return err("Invalid JSON", 400); }
-  if (!body.username || !body.password) return err('"username" and "password" are required', 400);
-
-  const user = await env.DB.prepare("SELECT id, password_hash FROM users WHERE username = ?")
-    .bind(body.username).first<{ id: string; password_hash: string }>();
-  if (!user) return err("Invalid username or password", 401);
-
-  const hash = await sha256(body.password);
-  if (hash !== user.password_hash) return err("Invalid username or password", 401);
-
-  const token = randomHex(32);
-  const now = Math.floor(Date.now() / 1000);
-  const exp = now + 7 * 86400;
-
-  await env.DB.prepare("INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?, ?, ?)")
-    .bind(token, user.id, exp).run();
-
-  return json({ session_token: token, expires_at: exp });
-}
-
-async function listDevices(request: Request, env: Env): Promise<Response> {
-  const session = await requireUser(request, env);
-  if (!session) return err("Unauthorized", 401);
-
-  const { results } = await env.DB.prepare(
-    "SELECT id, name, created_at FROM devices ORDER BY created_at DESC"
-  ).all();
-  return json(results);
-}
-
-async function getMeasurements(request: Request, env: Env): Promise<Response> {
-  const session = await requireUser(request, env);
-  if (!session) return err("Unauthorized", 401);
-
-  const url = new URL(request.url);
-  const deviceId = url.searchParams.get("device_id");
-  const startTime = url.searchParams.get("start_time");
-  const endTime = url.searchParams.get("end_time");
-  const bssid = url.searchParams.get("bssid");
-  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 1), 1000);
-  const offset = Math.max(parseInt(url.searchParams.get("offset") || "0", 10) || 0, 0);
-
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (deviceId) { conditions.push("m.device_id = ?"); params.push(deviceId); }
-  if (startTime) { conditions.push("m.timestamp >= ?"); params.push(parseInt(startTime, 10)); }
-  if (endTime) { conditions.push("m.timestamp <= ?"); params.push(parseInt(endTime, 10)); }
-
-  const join = bssid ? " INNER JOIN wifi_scans w ON m.id = w.measurement_id" : "";
-  let where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
-  if (bssid) {
-    where += where ? " AND w.bssid = ?" : "WHERE w.bssid = ?";
-    params.push(bssid);
-  }
-
-  const distinct = bssid ? "DISTINCT " : "";
-  const countSql = `SELECT COUNT(${bssid ? "DISTINCT m.id" : "*"}) as total FROM measurements m${join} ${where}`;
-  const dataSql = `SELECT ${distinct}m.id, m.device_id, m.timestamp, m.gps_lat, m.gps_lon, m.created_at FROM measurements m${join} ${where} ORDER BY m.timestamp DESC LIMIT ? OFFSET ?`;
-
-  const [countRes, dataRes] = await env.DB.batch([
-    env.DB.prepare(countSql).bind(...params),
-    env.DB.prepare(dataSql).bind(...params, limit, offset),
-  ]);
-
-  const measurements = dataRes.results as Array<{ id: number }>;
-  const total = (countRes.results?.[0] as { total: number } | undefined)?.total ?? 0;
-
-  if (measurements.length > 0) {
-    const ids = measurements.map((m) => m.id);
-    const placeholders = ids.map(() => "?").join(",");
-    const { results: scans } = await env.DB.prepare(
-      `SELECT measurement_id, ssid, bssid, rssi FROM wifi_scans WHERE measurement_id IN (${placeholders})`
-    ).bind(...ids).all();
-
-    const grouped = new Map<number, Array<{ ssid: string | null; bssid: string; rssi: number }>>();
-    for (const s of scans as Array<{ measurement_id: number; ssid: string | null; bssid: string; rssi: number }>) {
-      const list = grouped.get(s.measurement_id) ?? [];
-      list.push({ ssid: s.ssid, bssid: s.bssid, rssi: s.rssi });
-      grouped.set(s.measurement_id, list);
-    }
-    for (const m of measurements) {
-      (m as Record<string, unknown>).wifi_scans = grouped.get(m.id) ?? [];
-    }
-  }
-
-  return json({ measurements, total, limit, offset });
-}
-
-async function requireUser(request: Request, env: Env): Promise<{ id: string } | null> {
-  const token = getAuthUser(request);
-  if (!token) return null;
-  const now = Math.floor(Date.now() / 1000);
-  return env.DB.prepare("SELECT user_id AS id FROM user_sessions WHERE token = ? AND expires_at > ?")
-    .bind(token, now).first<{ id: string }>();
-}
+};
