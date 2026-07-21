@@ -16,9 +16,14 @@ class WifiScanner(private val context: Context) {
         return wifiManager?.startScan() ?: false
     }
 
-    fun getScanResults(): List<ScanResult> {
-        @Suppress("DEPRECATION")
-        return wifiManager?.scanResults ?: emptyList()
+    fun getScanResults(): List<ScanEntry> {
+        return (wifiManager?.scanResults ?: emptyList()).map { r ->
+            ScanEntry(
+                ssid = r.getWifiSsid()?.toString(),
+                bssid = r.BSSID,
+                rssi = r.level,
+            )
+        }
     }
 
     fun isThrottleWarningNeeded(): Boolean {
@@ -34,4 +39,6 @@ class WifiScanner(private val context: Context) {
         }
         return enabled
     }
+
+    data class ScanEntry(val ssid: String?, val bssid: String, val rssi: Int)
 }

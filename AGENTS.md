@@ -14,16 +14,22 @@ WiFi-CRUD/
 ├── wrangler.jsonc              # Frontend config
 ├── package.json                # Scripts + dipendenze
 ├── app/                        # Android app (Kotlin)
-│   ├── build.gradle.kts        #   Modulo Android
+│   ├── build.gradle.kts        #   Root build (AGP declaration)
 │   ├── settings.gradle.kts
-│   └── src/main/
-│       ├── AndroidManifest.xml
-│       ├── java/com/wificrud/app/
-│       │   ├── MainActivity.kt
-│       │   ├── api/ApiClient.kt
-│       │   ├── data/CredentialStore.kt
-│       │   └── scan/WifiScanner.kt
-│       └── res/
+│   ├── local.properties
+│   ├── gradle/
+│   ├── app/                    #   Modulo Android
+│   │   ├── build.gradle.kts
+│   │   └── src/main/
+│   │       ├── AndroidManifest.xml
+│   │       ├── java/com/wificrud/app/
+│   │       │   ├── MainActivity.kt
+│   │       │   ├── api/ApiClient.kt
+│   │       │   ├── data/CredentialStore.kt
+│   │       │   ├── scan/WifiScanner.kt
+│   │       │   ├── scan/ScanService.kt
+│   │       │   └── scan/ScanState.kt
+│   │       └── res/
 └── AGENTS.md
 ```
 
@@ -151,7 +157,7 @@ Query misurazioni. Autenticato con Bearer token.
 ### Build
 ```bash
 cd app
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
 ```
 
 ## Note tecniche

@@ -3,10 +3,13 @@ node_modules/
 
 # Android
 app/build/
+app/app/build/
 app/.gradle/
+app/app/.gradle/
 app/local.properties
 app/gradle/wrapper/gradle-wrapper.jar
 app/gradlew
 app/gradlew.bat
 *.iml
 .idea/
+/local.properties

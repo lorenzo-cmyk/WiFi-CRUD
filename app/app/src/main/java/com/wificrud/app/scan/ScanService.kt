@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -59,7 +60,7 @@ class ScanService : Service() {
     }
 
     private suspend fun scanLoop(intervalSec: Int) {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             val cycleStart = System.currentTimeMillis()
             val nextCycle = cycleStart + intervalSec * 1000L
             performScan()
@@ -76,8 +77,8 @@ class ScanService : Service() {
             wifi.startScan()
             delay(2500)
 
-            val results = wifi.getScanResults()
-            val scans = results.map { ApiClient.ScanEntry(it.ssid, it.bssid, it.level) }
+            val scanEntries = wifi.getScanResults()
+            val scans = scanEntries.map { ApiClient.ScanEntry(it.ssid, it.bssid, it.rssi) }
             val ts = System.currentTimeMillis() / 1000
 
             val postResult = api.postMeasurement(
@@ -92,13 +93,13 @@ class ScanService : Service() {
                 timestamp = ts,
                 gpsLat = location?.latitude,
                 gpsLon = location?.longitude,
-                networks = results.size,
+                networks = scanEntries.size,
                 measurementId = postResult.measurementId,
-                scans = scans.map { ScanState.ScanEntry(it.ssid, it.bssid, it.rssi) },
+                scans = scanEntries.map { ScanState.ScanEntry(it.ssid, it.bssid, it.rssi) },
             )
             ScanState.update { it.copy(lastMeasurement = measurement, error = null) }
 
-            updateNotification("Sent ${results.size} networks")
+            updateNotification("Sent ${scanEntries.size} networks")
         } catch (e: Exception) {
             ScanState.update { it.copy(error = e.message ?: "Unknown error") }
             updateNotification("Error: ${e.message}")
