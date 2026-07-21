@@ -52,6 +52,9 @@ export default {
     }
 
     try {
+      if (pathname === "/health" && method === "GET") {
+        return json({ status: "ok" });
+      }
       if (pathname === "/api/devices/register" && method === "POST") {
         return registerDevice(request, env);
       }
@@ -133,13 +136,15 @@ async function postMeasurement(request: Request, env: Env): Promise<Response> {
 async function loginUser(request: Request, env: Env): Promise<Response> {
   let body: { username?: string; password?: string };
   try { body = await request.json(); } catch { return err("Invalid JSON", 400); }
-  if (!body.username || !body.password) return err('"username" and "password" are required', 400);
+  const username = body.username?.trim();
+  const password = body.password?.trim();
+  if (!username || !password) return err('"username" and "password" are required', 400);
 
   const user = await env.DB.prepare("SELECT id, password_hash FROM users WHERE username = ?")
-    .bind(body.username).first<{ id: string; password_hash: string }>();
+    .bind(username).first<{ id: string; password_hash: string }>();
   if (!user) return err("Invalid username or password", 401);
 
-  const hash = await sha256(body.password);
+  const hash = await sha256(password);
   if (hash !== user.password_hash) return err("Invalid username or password", 401);
 
   const token = randomHex(32);
