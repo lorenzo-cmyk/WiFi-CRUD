@@ -13,6 +13,17 @@ WiFi-CRUD/
 ├── src/index.ts                # Frontend Worker (SPA HTML + Tailwind CDN)
 ├── wrangler.jsonc              # Frontend config
 ├── package.json                # Scripts + dipendenze
+├── app/                        # Android app (Kotlin)
+│   ├── build.gradle.kts        #   Modulo Android
+│   ├── settings.gradle.kts
+│   └── src/main/
+│       ├── AndroidManifest.xml
+│       ├── java/com/wificrud/app/
+│       │   ├── MainActivity.kt
+│       │   ├── api/ApiClient.kt
+│       │   ├── data/CredentialStore.kt
+│       │   └── scan/WifiScanner.kt
+│       └── res/
 └── AGENTS.md
 ```
 
@@ -113,6 +124,26 @@ Query misurazioni. Autenticato con Bearer token.
 ## Credenziali di default
 - Username: `admin`
 - Password: `password_poc`
+
+## Android App
+
+### Flusso first-time setup
+1. App chiede permessi: `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` (e `NEARBY_WIFI_DEVICES` su API 33+)
+2. Controlla se WiFi scan throttling è abilitato (Android 9+), mostra warning se sì
+3. Registra il device via `POST /api/devices/register` (name = `Build.MODEL`)
+4. Salva `device_id` e `auth_key` in SharedPreferences
+
+### Funzionalità
+- `CredentialStore` — wrapper SharedPreferences per device_id/auth_key/device_name
+- `ApiClient` — HTTP client con `HttpURLConnection` (nessuna dependency esterna), chiamate a register + postMeasurement
+- `WifiScanner` — wrapper attorno a `WifiManager` per scan + lettura risultati + throttle detection
+- `MainActivity` — UI con setup wizard (permessi → throttle → register) e schermata scan
+
+### Build
+```bash
+cd app
+./gradlew assembleDebug
+```
 
 ## Note tecniche
 

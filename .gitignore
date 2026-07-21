@@ -1,2 +1,12 @@
 node_modules/
 .wrangler/
+
+# Android
+app/build/
+app/.gradle/
+app/local.properties
+app/gradle/wrapper/gradle-wrapper.jar
+app/gradlew
+app/gradlew.bat
+*.iml
+.idea/
