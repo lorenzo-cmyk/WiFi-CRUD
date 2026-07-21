@@ -295,6 +295,8 @@ private fun DashboardScreen(
 ) {
     val ctx = LocalContext.current
     val creds = remember { CredentialStore(ctx) }
+    val scanner = remember { WifiScanner(ctx) }
+    val throttleWarning = remember { scanner.isThrottleWarningNeeded() }
     var intervalText by remember { mutableStateOf("30") }
 
     Column(
@@ -310,6 +312,22 @@ private fun DashboardScreen(
             color = Color.Gray,
         )
         Spacer(Modifier.height(16.dp))
+
+        if (throttleWarning) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3CD)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "WiFi scan throttling is enabled. Scans may be rate-limited.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF856404),
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Interval (s):", fontSize = 14.sp)
