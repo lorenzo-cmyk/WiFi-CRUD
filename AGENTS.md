@@ -1,24 +1,40 @@
-# WiFi-CRUD
+# LocFi
 
-IoT Tracking Backend + Frontend su Cloudflare Workers e D1.
+WiFi Intelligence — IoT Tracking Backend + Frontend su Cloudflare Workers e D1.
 
 ## Struttura
 
 ```
-WiFi-CRUD/
+LocFi/
 ├── backend/                    # API Worker
 │   ├── src/index.ts            #   Endpoints REST
 │   ├── wrangler.jsonc           #   Config (D1 binding)
 │   └── schema.sql              #   Schema DB
-├── src/index.ts                # Frontend Worker (SPA HTML + Tailwind CDN)
-├── wrangler.jsonc              # Frontend config
-├── package.json                # Scripts + dipendenze
+├── frontend/                   # Nuxt 4 + Nuxt UI (Frontend Worker)
+│   ├── app/
+│   │   ├── app.vue             #   Layout root (auth-aware header/footer)
+│   │   ├── app.config.ts       #   Tema UI (primary: green, neutral: slate)
+│   │   ├── assets/css/main.css #   Tailwind + @nuxt/ui
+│   │   ├── components/
+│   │   │   ├── MapDisplay.vue  #   Mappa Leaflet
+│   │   ├── composables/
+│   │   │   └── useAuth.ts      #   Login/logout + cookie sessione
+│   │   └── pages/
+│   │       ├── index.vue       #   Dashboard (mappa + markers)
+│   │       └── login.vue       #   Login form
+│   ├── server/
+│   │   ├── api/
+│   │   │   ├── login.post.ts   #   Proxy → POST /api/users/login
+│   │   │   └── measurements.get.ts  # Proxy → GET /api/measurements
+│   │   └── env.d.ts
+│   ├── nuxt.config.ts          #   Nuxt 4 + UI + Nitro cloudflare preset
+│   └── wrangler.jsonc           #   Worker config
 ├── app/                        # Android app (Kotlin)
-│   ├── build.gradle.kts        #   Root build (AGP declaration)
+│   ├── build.gradle.kts
 │   ├── settings.gradle.kts
 │   ├── local.properties
 │   ├── gradle/
-│   ├── app/                    #   Modulo Android
+│   ├── app/
 │   │   ├── build.gradle.kts
 │   │   └── src/main/
 │   │       ├── AndroidManifest.xml
@@ -30,6 +46,7 @@ WiFi-CRUD/
 │   │       │   ├── scan/ScanService.kt
 │   │       │   └── scan/ScanState.kt
 │   │       └── res/
+├── package.json                # Scripts root
 └── AGENTS.md
 ```
 
@@ -49,9 +66,12 @@ npm run deploy:backend     # deploy backend
 npm run db:migrate         # esegui schema.sql su D1 remoto
 npm run db:migrate:local   # esegui schema.sql su D1 locale
 
-# Frontend
-npm run dev               # wrangler dev (root)
-npm run deploy            # deploy frontend
+# Frontend (nuovo Nuxt)
+cd frontend
+npm run dev               # nuxt dev (porta 3000)
+npm run build             # nuxt build
+npm run deploy            # npm run build && wrangler deploy
+npm run typecheck         # nuxt typecheck
 ```
 
 ## Backend API
