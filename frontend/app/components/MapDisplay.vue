@@ -29,18 +29,46 @@ const mapContainer = ref<HTMLDivElement>()
 let map: L.Map | null = null
 let clusterGroup: L.MarkerClusterGroup | null = null
 
-const icon = L.divIcon({
-  html: `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="11" fill="#4A148C" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="#fff"/></svg>`,
-  className: 'bg-transparent !w-7 !h-7',
-  iconAnchor: [14, 14]
-})
-
 const OPERATORS = [
   { id: 'tim', name: 'TIM', color: '#0066CC', match: (s: string) => /^tim[- ]|telecom|alice/.test(s) },
   { id: 'wind3', name: 'Wind3', color: '#F97316', match: (s: string) => /wind3|windtre|^3[- ]|^wind[- ]|^win(d|dt)/i.test(s) },
   { id: 'vodafone', name: 'Vodafone/Fastweb', color: '#EAB308', match: (s: string) => /vodafone|fastweb/.test(s) },
   { id: 'iliad', name: 'Iliad', color: '#78350F', match: (s: string) => /iliad|^free[- ]/i.test(s) }
 ]
+
+const OTHER = { name: 'Other', color: '#6B7280' }
+
+function groupScans(scans: WifiScan[]): { name: string; color: string; networks: WifiScan[] }[] {
+  const groups = [
+    ...OPERATORS.map(op => ({ name: op.name, color: op.color, networks: [] as WifiScan[] })),
+    { name: OTHER.name, color: OTHER.color, networks: [] as WifiScan[] }
+  ]
+  const otherIdx = groups.length - 1
+  for (const w of scans) {
+    const ssid = w.ssid.replace(/^"|"$/g, '').toLowerCase()
+    const match = OPERATORS.findIndex(op => op.match(ssid))
+    groups[match >= 0 ? match : otherIdx]!.networks.push(w)
+  }
+  return groups
+}
+
+function dominantColor(scans: WifiScan[]): string {
+  if (!scans?.length) return '#6B7280'
+  const groups = groupScans(scans)
+  let best = groups[0]!
+  for (let i = 1; i < groups.length; i++) {
+    if (groups[i]!.networks.length > best.networks.length) best = groups[i]!
+  }
+  return best.networks.length > 0 ? best.color : '#6B7280'
+}
+
+function makeIcon(color: string) {
+  return L.divIcon({
+    html: `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="11" fill="${color}" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="#fff"/></svg>`,
+    className: 'bg-transparent !w-7 !h-7',
+    iconAnchor: [14, 14]
+  })
+}
 
 function popupContent(m: Measurement): string {
   const time = new Date(m.timestamp * 1000).toLocaleString()
@@ -52,19 +80,7 @@ function popupContent(m: Measurement): string {
     return html
   }
 
-  const groups: { name: string; color: string; networks: WifiScan[] }[] = [
-    ...OPERATORS.map(op => ({ name: op.name, color: op.color, networks: [] as WifiScan[] })),
-    { name: 'Other', color: '#6B7280', networks: [] }
-  ]
-  const otherIdx = groups.length - 1
-
-  for (const w of m.wifi_scans) {
-    const ssid = w.ssid.replace(/^"|"$/g, '').toLowerCase()
-    const match = OPERATORS.findIndex(op => op.match(ssid))
-    const idx = match >= 0 ? match : otherIdx
-    groups[idx]!.networks.push(w)
-  }
-
+  const groups = groupScans(m.wifi_scans)
   for (const g of groups) {
     if (!g.networks.length) continue
     html += sectionHtml(g.name, g.color, g.networks)
@@ -80,7 +96,7 @@ function sectionHtml(name: string, color: string, networks: WifiScan[]): string 
   html += `<div class="space-y-0.5">`
   for (const w of networks) {
     const ssid = w.ssid.replace(/^"|"$/g, '') || 'hidden'
-    html += `<div class="flex items-center justify-between gap-2 text-xs pl-3.5"><span class="truncate max-w-36">${ssid}</span><span class="font-mono text-gray-500 shrink-0">${w.rssi} dBm</span></div>`
+    html += `<div class="text-xs pl-3.5"><div class="flex items-center justify-between gap-2"><span class="truncate max-w-36">${ssid}</span><span class="font-mono text-gray-500 shrink-0">${w.rssi} dBm</span></div><div class="font-mono text-[10px] text-gray-400 truncate select-all">${w.bssid}</div></div>`
   }
   html += `</div></div>`
   return html
@@ -98,7 +114,8 @@ function updateMarkers() {
 
   for (const m of measurements) {
     if (!m.gps_lat || !m.gps_lon) continue
-    const marker = L.marker([m.gps_lat, m.gps_lon], { icon })
+    const color = dominantColor(m.wifi_scans)
+    const marker = L.marker([m.gps_lat, m.gps_lon], { icon: makeIcon(color) })
       .bindPopup(popupContent(m), { maxWidth: 340, minWidth: 280 })
     markers.push(marker)
     bounds.extend([m.gps_lat, m.gps_lon])
@@ -109,7 +126,7 @@ function updateMarkers() {
   map.addLayer(clusterGroup)
 
   if (markers.length > 0) {
-    map.fitBounds(bounds, { padding: [40, 40] })
+    map!.whenReady(() => map!.fitBounds(bounds, { padding: [40, 40] }))
   }
 }
 

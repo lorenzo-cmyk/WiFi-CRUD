@@ -1,6 +1,11 @@
 <script setup lang="ts">
 const auth = useAuth()
 
+function handleLogout() {
+  auth.logout()
+  navigateTo('/login', { replace: true })
+}
+
 useHead({
   meta: [
     { name: 'viewport', content: 'width=device-width, initial-scale=1' }
@@ -30,13 +35,12 @@ useSeoMeta({
         </template>
 
         <template #right>
-          <UColorModeButton />
           <UButton
             color="neutral"
             variant="ghost"
             icon="i-lucide-log-out"
             aria-label="Sign out"
-            @click="auth.logout()"
+            @click="handleLogout"
           />
         </template>
       </UHeader>
