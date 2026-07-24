@@ -36,6 +36,8 @@ const { data } = await useFetch<{ measurements: Measurement[] }>('/api/measureme
 
 const measurements = computed(() => data.value?.measurements ?? [])
 
+const visibleStats = ref<Record<string, number>>({})
+
 const { data: devicesData } = await useFetch<Array<{ id: string; name: string }>>('/api/devices', {
   headers: { 'Authorization': `Bearer ${auth.sessionToken.value}` }
 })
@@ -78,7 +80,11 @@ const TIME_OPTIONS = [
 <template>
   <div class="h-[calc(100dvh-7rem)] relative">
     <ClientOnly>
-      <MapDisplay :measurements="measurements" class="absolute inset-0" />
+      <MapDisplay
+        :measurements="measurements"
+        class="absolute inset-0"
+        @visible-stats="visibleStats = $event"
+      />
     </ClientOnly>
 
     <div class="absolute top-4 right-4 z-[1000] w-56 space-y-2">
@@ -152,6 +158,14 @@ const TIME_OPTIONS = [
             <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#EAB308" />Vodafone/Fastweb</div>
             <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#78350F" />Iliad</div>
             <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#6B7280" />Other</div>
+          </div>
+
+          <div v-if="Object.keys(visibleStats).length" class="text-xs text-muted space-y-0.5">
+            <p class="text-xs text-muted mb-1">Visible networks</p>
+            <div v-for="(count, name) in visibleStats" :key="name" class="flex justify-between gap-2">
+              <span>{{ name }}</span>
+              <span class="font-mono">{{ count }}</span>
+            </div>
           </div>
         </div>
       </UCard>

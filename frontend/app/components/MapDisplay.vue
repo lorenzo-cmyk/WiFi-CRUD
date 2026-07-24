@@ -25,6 +25,10 @@ const props = defineProps<{
   measurements: Measurement[]
 }>()
 
+const emit = defineEmits<{
+  visibleStats: [stats: Record<string, number>]
+}>()
+
 const mapContainer = ref<HTMLDivElement>()
 let map: L.Map | null = null
 let clusterGroup: L.MarkerClusterGroup | null = null
@@ -121,6 +125,26 @@ function clusterIcon(cluster: L.MarkerCluster) {
   })
 }
 
+function emitVisibleStats() {
+  if (!map) return
+  const bounds = map.getBounds()
+  const matching = props.measurements.filter(m =>
+    m.gps_lat && m.gps_lon && bounds.contains([m.gps_lat, m.gps_lon])
+  )
+  const counts: Record<string, number> = {}
+  for (const op of OPERATORS) counts[op.name] = 0
+  counts[OTHER.name] = 0
+  for (const m of matching) {
+    for (const w of m.wifi_scans) {
+      const ssid = w.ssid.replace(/^"|"$/g, '').toLowerCase()
+      const match = OPERATORS.findIndex(op => op.match(ssid))
+      const name = match >= 0 ? OPERATORS[match]!.name : OTHER.name
+      counts[name] = (counts[name] || 0) + 1
+    }
+  }
+  emit('visibleStats', counts)
+}
+
 function updateMarkers() {
   if (!map) return
   clusterGroup?.clearLayers()
@@ -164,9 +188,13 @@ onMounted(() => {
   }).addTo(map)
 
   updateMarkers()
+  map.on('moveend', emitVisibleStats)
 })
 
-watch(() => props.measurements, updateMarkers)
+watch(() => props.measurements, () => {
+  updateMarkers()
+  emitVisibleStats()
+})
 
 onUnmounted(() => {
   if (clusterGroup && map) map.removeLayer(clusterGroup)
