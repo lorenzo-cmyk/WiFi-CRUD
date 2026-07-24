@@ -41,6 +41,32 @@ const { data: devicesData } = await useFetch<Array<{ id: string; name: string }>
 })
 const devices = computed(() => devicesData.value ?? [])
 
+function exportCsv() {
+  const rows = measurements.value
+  if (!rows.length) return
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const header = ['id', 'device_id', 'timestamp', 'gps_lat', 'gps_lon', 'ssid', 'bssid', 'rssi'].join(',')
+  const lines: string[] = []
+  for (const m of rows) {
+    const base = [m.id, m.device_id, new Date(m.timestamp * 1000).toISOString(), m.gps_lat, m.gps_lon]
+    if (!m.wifi_scans?.length) {
+      lines.push([...base, '', '', ''].map(esc).join(','))
+    } else {
+      for (const w of m.wifi_scans) {
+        const ssid = w.ssid.replace(/^"|"$/g, '')
+        lines.push([...base, ssid, w.bssid, w.rssi].map(esc).join(','))
+      }
+    }
+  }
+  const blob = new Blob([header + '\n' + lines.join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `locfi-measurements-${timeRange.value}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 const TIME_OPTIONS = [
   { value: '1h', label: '1h' },
   { value: '1d', label: '1d' },
@@ -103,6 +129,19 @@ const TIME_OPTIONS = [
               {{ measurements.length }} points
             </ClientOnly>
           </div>
+
+          <hr class="border-default" />
+
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="soft"
+            block
+            icon="i-lucide-download"
+            @click="exportCsv"
+          >
+            Export CSV
+          </UButton>
 
           <hr class="border-default" />
 

@@ -102,6 +102,25 @@ function sectionHtml(name: string, color: string, networks: WifiScan[]): string 
   return html
 }
 
+function clusterIcon(cluster: L.MarkerCluster) {
+  const childMarkers = cluster.getAllChildMarkers()
+  const counts: Record<string, number> = {}
+  for (const m of childMarkers) {
+    const c = (m as any)._dominantColor || '#6B7280'
+    counts[c] = (counts[c] || 0) + 1
+  }
+  let bestColor = '#6B7280'
+  let bestCount = 0
+  for (const [c, n] of Object.entries(counts)) {
+    if (n > bestCount) { bestCount = n; bestColor = c }
+  }
+  return L.divIcon({
+    html: `<div class="flex items-center justify-center w-full h-full rounded-full font-bold text-sm text-white" style="background:${bestColor}">${cluster.getChildCount()}</div>`,
+    className: 'cluster-icon',
+    iconSize: L.point(40, 40)
+  })
+}
+
 function updateMarkers() {
   if (!map) return
   clusterGroup?.clearLayers()
@@ -117,11 +136,15 @@ function updateMarkers() {
     const color = dominantColor(m.wifi_scans)
     const marker = L.marker([m.gps_lat, m.gps_lon], { icon: makeIcon(color) })
       .bindPopup(popupContent(m), { maxWidth: 340, minWidth: 280 })
+    ;(marker as any)._dominantColor = color
     markers.push(marker)
     bounds.extend([m.gps_lat, m.gps_lon])
   }
 
-  clusterGroup = L.markerClusterGroup({ chunkedLoading: true })
+  clusterGroup = L.markerClusterGroup({
+    chunkedLoading: true,
+    iconCreateFunction: clusterIcon
+  })
   clusterGroup.addLayers(markers)
   map.addLayer(clusterGroup)
 
@@ -156,3 +179,14 @@ onUnmounted(() => {
 <template>
   <div ref="mapContainer" class="w-full h-full rounded-lg overflow-hidden" />
 </template>
+
+<style>
+.cluster-icon {
+  background: none !important;
+  border: none !important;
+}
+.cluster-icon div {
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
+}
+</style>
