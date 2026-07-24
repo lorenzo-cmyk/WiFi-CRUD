@@ -206,11 +206,9 @@ async function getMeasurements(request: Request, env: Env): Promise<Response> {
   const total = (countRes.results?.[0] as { total: number } | undefined)?.total ?? 0;
 
   if (measurements.length > 0) {
-    const ids = measurements.map((m) => m.id);
-    const placeholders = ids.map(() => "?").join(",");
     const { results: scans } = await env.DB.prepare(
-      `SELECT measurement_id, ssid, bssid, rssi FROM wifi_scans WHERE measurement_id IN (${placeholders})`
-    ).bind(...ids).all();
+      `SELECT measurement_id, ssid, bssid, rssi FROM wifi_scans WHERE measurement_id IN (SELECT m.id FROM measurements m${join} ${where} ORDER BY m.timestamp DESC LIMIT ? OFFSET ?)`
+    ).bind(...params, limit, offset).all();
 
     const grouped = new Map<number, Array<{ ssid: string | null; bssid: string; rssi: number }>>();
     for (const s of scans as Array<{ measurement_id: number; ssid: string | null; bssid: string; rssi: number }>) {

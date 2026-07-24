@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.markercluster'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+
+export interface WifiScan {
+  ssid: string
+  bssid: string
+  rssi: number
+}
 
 export interface Measurement {
   id: number
@@ -9,6 +18,7 @@ export interface Measurement {
   gps_lat: number
   gps_lon: number
   created_at: number
+  wifi_scans: WifiScan[]
 }
 
 const props = defineProps<{
@@ -17,31 +27,86 @@ const props = defineProps<{
 
 const mapContainer = ref<HTMLDivElement>()
 let map: L.Map | null = null
-let markers: L.Marker[] = []
+let clusterGroup: L.MarkerClusterGroup | null = null
 
 const icon = L.divIcon({
-  html: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="size-6 text-primary"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>`,
-  className: 'bg-transparent !w-6 !h-6',
-  iconAnchor: [12, 12]
+  html: `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="11" fill="#4A148C" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="4" fill="#fff"/></svg>`,
+  className: 'bg-transparent !w-7 !h-7',
+  iconAnchor: [14, 14]
 })
 
+const OPERATORS = [
+  { id: 'tim', name: 'TIM', color: '#0066CC', match: (s: string) => /^tim[- ]|telecom|alice/.test(s) },
+  { id: 'wind3', name: 'Wind3', color: '#F97316', match: (s: string) => /wind3|windtre|^3[- ]|^wind[- ]|^win(d|dt)/i.test(s) },
+  { id: 'vodafone', name: 'Vodafone/Fastweb', color: '#EAB308', match: (s: string) => /vodafone|fastweb/.test(s) },
+  { id: 'iliad', name: 'Iliad', color: '#78350F', match: (s: string) => /iliad|^free[- ]/i.test(s) }
+]
+
+function popupContent(m: Measurement): string {
+  const time = new Date(m.timestamp * 1000).toLocaleString()
+  const device = m.device_id?.slice(0, 8)
+  let html = `<div class="text-sm font-semibold mb-0.5" style="color:#4A148C">${device}…</div>`
+  html += `<div class="text-xs text-gray-500 mb-2">${time}</div>`
+  if (!m.wifi_scans?.length) {
+    html += `<div class="text-xs text-gray-400">No WiFi data</div>`
+    return html
+  }
+
+  const groups: { name: string; color: string; networks: WifiScan[] }[] = [
+    ...OPERATORS.map(op => ({ name: op.name, color: op.color, networks: [] as WifiScan[] })),
+    { name: 'Other', color: '#6B7280', networks: [] }
+  ]
+  const otherIdx = groups.length - 1
+
+  for (const w of m.wifi_scans) {
+    const ssid = w.ssid.replace(/^"|"$/g, '').toLowerCase()
+    const match = OPERATORS.findIndex(op => op.match(ssid))
+    const idx = match >= 0 ? match : otherIdx
+    groups[idx]!.networks.push(w)
+  }
+
+  for (const g of groups) {
+    if (!g.networks.length) continue
+    html += sectionHtml(g.name, g.color, g.networks)
+  }
+
+  html += `<div class="text-xs text-gray-400 mt-1.5">${m.wifi_scans.length} total networks</div>`
+  return html
+}
+
+function sectionHtml(name: string, color: string, networks: WifiScan[]): string {
+  let html = `<div class="mt-1.5 first:mt-0">`
+  html += `<div class="flex items-center gap-1.5 mb-1"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${color}"></span><span class="text-xs font-semibold" style="color:${color}">${name}</span><span class="text-xs text-gray-400">(${networks.length})</span></div>`
+  html += `<div class="space-y-0.5">`
+  for (const w of networks) {
+    const ssid = w.ssid.replace(/^"|"$/g, '') || 'hidden'
+    html += `<div class="flex items-center justify-between gap-2 text-xs pl-3.5"><span class="truncate max-w-36">${ssid}</span><span class="font-mono text-gray-500 shrink-0">${w.rssi} dBm</span></div>`
+  }
+  html += `</div></div>`
+  return html
+}
+
 function updateMarkers() {
-  markers.forEach(m => m.remove())
-  markers = []
+  if (!map) return
+  clusterGroup?.clearLayers()
 
   const measurements = props.measurements
-  if (!measurements?.length || !map) return
+  if (!measurements?.length) return
 
   const bounds = L.latLngBounds([])
+  const markers: L.Marker[] = []
 
   for (const m of measurements) {
     if (!m.gps_lat || !m.gps_lon) continue
     const marker = L.marker([m.gps_lat, m.gps_lon], { icon })
-      .addTo(map)
-      .bindPopup(`Device: ${m.device_id?.slice(0, 8)}…<br>Time: ${new Date(m.timestamp * 1000).toLocaleString()}`)
+      .bindPopup(popupContent(m), { maxWidth: 340, minWidth: 280 })
     markers.push(marker)
     bounds.extend([m.gps_lat, m.gps_lon])
   }
+
+  clusterGroup = L.markerClusterGroup({ chunkedLoading: true })
+  clusterGroup.addLayers(markers)
+  map.addLayer(clusterGroup)
 
   if (markers.length > 0) {
     map.fitBounds(bounds, { padding: [40, 40] })
@@ -64,10 +129,10 @@ onMounted(() => {
 watch(() => props.measurements, updateMarkers)
 
 onUnmounted(() => {
-  markers.forEach(m => m.remove())
-  markers = []
+  if (clusterGroup && map) map.removeLayer(clusterGroup)
   map?.remove()
   map = null
+  clusterGroup = null
 })
 </script>
 
