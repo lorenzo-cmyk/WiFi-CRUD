@@ -3,8 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
     "dev:backend": "wrangler dev --config backend/wrangler.jsonc",
     "deploy:backend": "wrangler deploy --config backend/wrangler.jsonc",
     "db:migrate": "wrangler d1 execute wifi-crud-db --remote --file=backend/schema.sql",
