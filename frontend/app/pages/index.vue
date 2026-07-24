@@ -37,6 +37,7 @@ const { data } = await useFetch<{ measurements: Measurement[] }>('/api/measureme
 const measurements = computed(() => data.value?.measurements ?? [])
 
 const visibleStats = ref<Record<string, number>>({})
+const totalVisible = computed(() => Object.values(visibleStats.value).reduce((a, b) => a + b, 0))
 
 const { data: devicesData } = await useFetch<Array<{ id: string; name: string }>>('/api/devices', {
   headers: { 'Authorization': `Bearer ${auth.sessionToken.value}` }
@@ -152,12 +153,17 @@ const TIME_OPTIONS = [
           <hr class="border-default" />
 
           <div class="space-y-1">
-            <p class="text-xs text-muted mb-1">Legend</p>
-            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#0066CC" />TIM</span><span class="font-mono text-gray-400">{{ visibleStats.TIM ?? 0 }}</span></div>
-            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#F97316" />Wind3</span><span class="font-mono text-gray-400">{{ visibleStats.Wind3 ?? 0 }}</span></div>
-            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#EAB308" />Vodafone/Fastweb</span><span class="font-mono text-gray-400">{{ visibleStats['Vodafone/Fastweb'] ?? 0 }}</span></div>
-            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#78350F" />Iliad</span><span class="font-mono text-gray-400">{{ visibleStats.Iliad ?? 0 }}</span></div>
-            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#6B7280" />Other</span><span class="font-mono text-gray-400">{{ visibleStats.Other ?? 0 }}</span></div>
+            <p class="text-xs text-muted mb-1">Legend <span class="text-gray-400 font-normal">(visible area)</span></p>
+            <div v-for="{ name, color } in [
+              { name: 'TIM', color: '#0066CC' },
+              { name: 'Wind3', color: '#F97316' },
+              { name: 'Vodafone/Fastweb', color: '#EAB308' },
+              { name: 'Iliad', color: '#78350F' },
+              { name: 'Other', color: '#6B7280' }
+            ]" :key="name" class="flex items-center justify-between gap-2 text-xs">
+              <span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" :style="{ background: color }" />{{ name }}</span>
+              <span class="font-mono text-gray-400">{{ ((visibleStats[name] ?? 0) / totalVisible * 100 || 0).toFixed(1) }}%</span>
+            </div>
           </div>
         </div>
       </UCard>
