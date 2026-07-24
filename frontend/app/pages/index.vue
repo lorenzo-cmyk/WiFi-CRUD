@@ -153,19 +153,11 @@ const TIME_OPTIONS = [
 
           <div class="space-y-1">
             <p class="text-xs text-muted mb-1">Legend</p>
-            <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#0066CC" />TIM</div>
-            <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#F97316" />Wind3</div>
-            <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#EAB308" />Vodafone/Fastweb</div>
-            <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#78350F" />Iliad</div>
-            <div class="flex items-center gap-1.5 text-xs"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#6B7280" />Other</div>
-          </div>
-
-          <div v-if="Object.keys(visibleStats).length" class="text-xs text-muted space-y-0.5">
-            <p class="text-xs text-muted mb-1">Visible networks</p>
-            <div v-for="(count, name) in visibleStats" :key="name" class="flex justify-between gap-2">
-              <span>{{ name }}</span>
-              <span class="font-mono">{{ count }}</span>
-            </div>
+            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#0066CC" />TIM</span><span class="font-mono text-gray-400">{{ visibleStats.TIM ?? 0 }}</span></div>
+            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#F97316" />Wind3</span><span class="font-mono text-gray-400">{{ visibleStats.Wind3 ?? 0 }}</span></div>
+            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#EAB308" />Vodafone/Fastweb</span><span class="font-mono text-gray-400">{{ visibleStats['Vodafone/Fastweb'] ?? 0 }}</span></div>
+            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#78350F" />Iliad</span><span class="font-mono text-gray-400">{{ visibleStats.Iliad ?? 0 }}</span></div>
+            <div class="flex items-center justify-between gap-2 text-xs"><span class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:#6B7280" />Other</span><span class="font-mono text-gray-400">{{ visibleStats.Other ?? 0 }}</span></div>
           </div>
         </div>
       </UCard>
